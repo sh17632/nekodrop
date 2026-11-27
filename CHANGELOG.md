@@ -6,6 +6,28 @@
 
 ---
 
+## 未发布 / Unreleased
+
+### 中文
+
+- **修复：默认路径下传输会在对端握手之后停住（AirDrop 传大文件卡在几个百分点，两个方向都可能）**：
+  - 现象：`PC → Mac/iPhone` 传到几 MB 就停；引擎日志里"已写入 socket"的字节数停在发送缓冲大小（4 MiB + 一个 512 KiB 批次）附近，30 秒后报 `stalled`；同方向的 ICMP 100 % 丢弃、裸 TCP 连接超时。
+  - 原因：`awdl::BaFilter` 在"有接收 Block Ack 会话 + 数据忙"时把 `promiscuous` 关掉，以配合硬件 Block Ack 记账。但监听器的 `bssid_addr` 是**广播地址**，`_promisc` 一关，固件的数据帧过滤只放行组播与管理帧——**指向本机单播地址的数据帧全部被丢弃**，对端的 ACK 收不到，发送窗口填满即停。
+  - 该分支原本只该服务聚合（`--aggregate`）路径，却因为缺少 `agg.on` 条件而在默认路径生效，与 v0.1.23"默认非聚合路径 100 % 不变"的说明不符。
+  - 修复：默认路径**不再关闭接收过滤**（聚合路径仍按原有监听器状态处理）；`NEKODROP_BA_FILTER=1` 可恢复旧行为用于 A/B。
+  - 实测（AX211，`so-a0-gf-a0-68`，2026-11-27）：ICMP 由 `0/20` 变为 `20/20`（RTT 3–54 ms）；100 MB `Mac → PC` 全程 **2.19–2.37 MB/s**（约 19 Mbit/s）；`PC → Mac` 的 100 MB 由"卡在 5 %"变为**成功完成**。
+
+### English
+
+- **Fix: transfers stalled after the peer's handshake on the default path (AirDrop uploads stuck at a few percent, either direction):**
+  - Symptom: a `PC → Mac/iPhone` upload stopped a few MB in; the engine's "written to the socket" counter parked at the send buffer size (4 MiB + one 512 KiB batch) and reported `stalled` 30 s later, while ICMP in the same direction was 100 % lost and a raw TCP connect timed out.
+  - Cause: `awdl::BaFilter` turns `promiscuous` off when a receive Block Ack session is busy, to keep the firmware's Block Ack accounting intact. The listener's `bssid_addr` is the **broadcast address**, so with `_promisc` off the firmware's data filter accepts only group-addressed and management frames — **every unicast data frame to this node is dropped**, the peer's acknowledgements never arrive and the sender's window fills up.
+  - That branch was meant for the aggregate (`--aggregate`) path only, but had no `agg.on` guard, contradicting the v0.1.23 note that "the default non-aggregate path is 100 % untouched".
+  - Fix: the default path **never closes the receive filter** (the aggregate path keeps its own listener state); `NEKODROP_BA_FILTER=1` restores the old behaviour for A/B runs.
+  - Measured (AX211, `so-a0-gf-a0-68`, 2026-11-27): ICMP went from `0/20` to `20/20` (RTT 3–54 ms); a 100 MB `Mac → PC` ran at **2.19–2.37 MB/s** (~19 Mbit/s); a 100 MB `PC → Mac` upload went from "stuck at 5 %" to **completing**.
+
+---
+
 ## v2.3.9 (Preview / 预览版)
 
 ### 中文

@@ -1618,14 +1618,34 @@ int main(int argc, char **argv) {
         if constexpr (caps.supports_rx_ba) {
           for (unsigned t = 0; t < 8; t++) any_ba |= dev.rx_ba_open(t);
         }
+        /* Closing the receive filter while a receive Block Ack session is busy
+         * (awdl::BaFilter) was meant to keep the firmware's Block Ack
+         * accounting intact. On this path it breaks reception instead: the
+         * listener's BSSID is the broadcast address, so with promiscuous off
+         * the firmware accepts only group-addressed and management frames and
+         * every unicast data frame to this node is dropped. Measured on an
+         * AX211 (so-a0-gf-a0-68, 2026-11-27): a peer's ICMP echoes went 0/20
+         * (100 % loss) with the filter closed and 20/20 (RTT 3-54 ms) with it
+         * open, and a 100 MB AirDrop upload stalled at the sender's socket
+         * buffer because the peer's acknowledgements never arrived. The
+         * aggregate path closes the filter through its own listener state
+         * below, so this hysteresis only ever affected the default path, where
+         * it must not run. NEKODROP_BA_FILTER=1 restores it for an A/B run. */
+        static const bool ba_filter_on = [] {
+          const char *v = std::getenv("NEKODROP_BA_FILTER");
+          return v && std::atoi(v) != 0;
+        }();
         if (agg.on && agg.step == Agg::Asking) {
           if (!dev.promiscuous()) dev.set_promiscuous(true);
         } else if (agg.on && agg.step == Agg::Agreed) {
           if (dev.promiscuous()) dev.set_promiscuous(false);
-        } else if (any_ba && ba_filter.note(now_us(), rx_data_to_us)) {
+        } else if (ba_filter_on && any_ba && ba_filter.note(now_us(), rx_data_to_us)) {
           dev.set_promiscuous(!ba_filter.off);
         } else if (!any_ba && !dev.promiscuous()) {
           ba_filter = awdl::BaFilter{};
+          dev.set_promiscuous(true);
+        } else if (!dev.promiscuous()) {
+          /* The filter stays open on this path whatever the sessions say. */
           dev.set_promiscuous(true);
         }
       }
