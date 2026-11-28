@@ -729,7 +729,18 @@ public sealed class Supervisor : IDisposable
             string[] awdlArgs = useHe80
                 ? ["-c", channel.ToString(), "-H", "-M", "1500"]
                 : ["-c", channel.ToString()];
-            _awdld = Spawn(Path.Combine(_root, "awdl", "awdld.exe"), awdlArgs, OnAwdldLine);
+            // An awdld built from the pinned winawdl source predates -H/-M (the
+            // released binary has them). Launched with flags it does not know it
+            // prints its usage and exits, which reads as a radio that keeps
+            // failing: the card goes back to Windows and AirDrop disappears with
+            // no hint why. Start it without them instead.
+            string awdldExe = Path.Combine(_root, "awdl", "awdld.exe");
+            if (useHe80 && !AwdldTakesHighThroughput(awdldExe))
+            {
+                awdlArgs = ["-c", channel.ToString()];
+                Say("awdld does not take -H/-M (built from source?): starting without high throughput");
+            }
+            _awdld = Spawn(awdldExe, awdlArgs, OnAwdldLine);
         }
         catch (Exception e)
         {
@@ -754,6 +765,45 @@ public sealed class Supervisor : IDisposable
         }
     }
 
+    /// <summary>Whether the awdld at <paramref name="exe"/> accepts the high-throughput
+    /// flags. The released binary does; one built from the pinned winawdl source does
+    /// not, and launched with -H it prints its usage and exits. An unknown option makes
+    /// awdld print that usage before it touches the card, so the first start probes once
+    /// and caches the answer.</summary>
+    static bool AwdldTakesHighThroughput(string exe)
+    {
+        lock (_probeLock)
+        {
+            if (_awdldTakesHighThroughput is { } known) return known;
+            bool takes = false;
+            try
+            {
+                var info = new ProcessStartInfo(exe, "-Z")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var probe = Process.Start(info);
+                if (probe is not null)
+                {
+                    var err = probe.StandardError.ReadToEndAsync();
+                    var outp = probe.StandardOutput.ReadToEndAsync();
+                    if (!probe.WaitForExit(2000))
+                    {
+                        try { probe.Kill(true); } catch (Exception) { }
+                    }
+                    takes = (err.GetAwaiter().GetResult() + outp.GetAwaiter().GetResult()).Contains("-H");
+                }
+            }
+            catch (Exception) { }
+            _awdldTakesHighThroughput = takes;
+            return takes;
+        }
+    }
+    static readonly object _probeLock = new();
+    static bool? _awdldTakesHighThroughput;
     /* awdld warns for every frame it does not parse, several a second (issue #1):
        the first is logged, then one count a minute. */
     readonly object _noiseLock = new();
