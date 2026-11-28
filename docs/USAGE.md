@@ -115,3 +115,23 @@ In *Settings → Experimental*, all off by default; turning one off restores the
 - **Time sharing when Wi-Fi and AirDrop use different channels**: tells the iPhone when the PC is away with the router. With nekodrop's Wi-Fi on another 5 GHz channel, one AX211 heard no AirDrop frame without it ([#35](../../../issues/35)); on one AX200 speeds went both up and down ([#4](../../../issues/4)).
 - **Faster unlock of a passive 5 GHz channel**: scans sooner so cards that refuse the country code can transmit earlier ([#11](../../../issues/11)).
 - **Standby BLE beacon (`NEKODROP_BLE_STANDBY=1`)**: optional environment variable contributed in [#69](../../../pull/69) (off by default) to keep the BLE AirDrop advertisement active while receiving on standby.
+
+### A device does not appear in the list
+
+The Apple device has to be listening for AirDrop before it can list anyone, and
+its AWDL stack can get stuck: the phone keeps spinning and never shows the PC,
+while the PC shows the phone and transfers *from* the phone still work.
+
+On an iPhone 14 Pro (iOS 18.7.8, 2026-11-28) the only thing that fixed it was to
+**restart the phone**. Nothing on the PC side changed: the MIF nekodrop sends is
+the same one a Mac sends, and the very same build listed the PC on other iOS
+versions.
+
+Try these first, in this order:
+
+1. restart the Apple device;
+2. switch its Bluetooth off and on, then its Wi-Fi off and on;
+3. set AirDrop to "Everyone for 10 minutes" and leave the share sheet open;
+4. unlock the device and turn off any Focus mode.
+
+Only then collect data from the PC; `docs/SUPPORT.md` says what helps.
