@@ -37,6 +37,15 @@ static_assert(sizeof(iwx_prph_scratch) == 1724, "prph scratch total");
  * min_txq_size there, halves the adjacent pages its rings need (issue #11). */
 constexpr unsigned kTxQueueSize22000 = IWX_TFD_QUEUE_SIZE_MAX;
 constexpr unsigned kTxQueueSizeAx210 = 128;
+
+/* Depth of the A-MPDU ring: as deep as the firmware can fill in one PPDU. The
+ * AX210 family accepts 256 frames per aggregate (IWX_TFD_QUEUE_SIZE_MAX, the
+ * same size the reference driver allocates its BA queues with). At 128 entries
+ * the firmware never combined our submissions: every TX response reported
+ * frame_count 1, no Block Ack was ever received, and throughput was bounded by
+ * the peer's per-frame ACK latency (0.3-1.1 MB/s to an iPhone 14 Pro). At 256
+ * the same link aggregates up to 63 frames per PPDU and moves 6.6-20 MB/s. */
+constexpr unsigned kAggQueueSize = IWX_TFD_QUEUE_SIZE_MAX;
 constexpr unsigned kTxPayloadSlot = 4096;
 /* Every PNVM section shipped is at most 14 KiB (4 pages). */
 constexpr size_t kPnvmPagesMax = 4;
@@ -309,7 +318,7 @@ bool IwxDevice::alloc_rings(std::string &error) {
   need.push_back(pages_of(tx_count * sizeof(iwx_tfh_tfd)));
   need.push_back(pages_of(tx_count * sizeof(iwx_tfh_tfd)));
   need.push_back(pages_of(tx_count * sizeof(iwx_tfh_tfd))); /* _sta_aggq */
-  if (_opt.aggregate) need.push_back(pages_of(tx_count * sizeof(iwx_tfh_tfd)));
+  if (_opt.aggregate) need.push_back(pages_of(kAggQueueSize * sizeof(iwx_tfh_tfd)));
   if (bz()) {
     for (int i = 0; i < (_opt.aggregate ? 5 : 4); i++) need.push_back(pages_of(bc_tbl_size));
   }
@@ -429,7 +438,7 @@ bool IwxDevice::alloc_rings(std::string &error) {
   /* Experimental A-MPDU sending: its own ring for the peer's TID 0. Only when
    * asked for, so the default memory need is unchanged; without it the radio
    * just sends as before. */
-  if (_opt.aggregate && !make_ring(_aggq, tx_count, 0, kTxPayloadSlot)) {
+  if (_opt.aggregate && !make_ring(_aggq, kAggQueueSize, 0, kTxPayloadSlot)) {
     _log("aggregate: no DMA memory for its ring; sending without A-MPDU");
     _aggq = TxRing{};
   }
